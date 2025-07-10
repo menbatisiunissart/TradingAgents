@@ -886,14 +886,14 @@ wheels = [
 
 [[package]]
 name = "finnhub-python"
-version = "2.4.23"
+version = "2.4.24"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6f/8b/1fadbc5c4ed807071ac2f72c6e051ba39d06a746357d3c717d0edea21607/finnhub_python-2.4.23.tar.gz", hash = "sha256:47b74f0c994af900a4b1c76376cf5b75d03a33ee3a5ff2c30e3c4472bc834959", size = 13459, upload-time = "2025-03-16T06:11:37.579Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5d/48/240ee1f707cc82083fdd8ba162e4e9526430d1e8fbdb85246ae3a3b1c5f9/finnhub_python-2.4.24.tar.gz", hash = "sha256:cc505a344b8e73a7ba8174fe9646340493b028c94c6ad4bfe15ae9c078aa2458", size = 13544, upload-time = "2025-06-27T10:09:00.101Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/17/09/9240b2a222717e7bda81f954047b662f2744aaeb6b29d62e89bb5c49dd16/finnhub_python-2.4.23-py3-none-any.whl", hash = "sha256:27585dfa32a92b435bd69bfbc9062bcf41a3b35302b654062816640f67b89eea", size = 11897, upload-time = "2025-03-16T06:11:36.085Z" },
+    { url = "https://files.pythonhosted.org/packages/1a/2b/902ab93168c1e17dfb1687436afe544878d4c8aa681d26a9bebea255a73d/finnhub_python-2.4.24-py3-none-any.whl", hash = "sha256:beebd4c31d0792a4b30fb5d2c81176072fa8638a89dd152fc0676f507e594789", size = 11967, upload-time = "2025-06-27T10:08:58.696Z" },
 ]
 
 [[package]]
@@ -1831,7 +1831,7 @@ name = "langgraph-checkpoint"
 version = "2.0.26"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "langchain-core", marker = "python_full_version < '4.0'" },
+    { name = "langchain-core", marker = "python_full_version < '4'" },
     { name = "ormsgpack" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c5/61/e2518ac9216a4e9f4efda3ac61595e3c9e9ac00833141c9688e8d56bd7eb/langgraph_checkpoint-2.0.26.tar.gz", hash = "sha256:2b800195532d5efb079db9754f037281225ae175f7a395523f4bf41223cbc9d6", size = 37874, upload-time = "2025-05-15T17:31:22.466Z" }
@@ -4708,6 +4708,7 @@ dependencies = [
     { name = "pandas" },
     { name = "parsel" },
     { name = "praw" },
+    { name = "python-dotenv" },
     { name = "pytz" },
     { name = "questionary" },
     { name = "redis" },
@@ -4729,7 +4730,7 @@ requires-dist = [
     { name = "chromadb", specifier = ">=1.0.12" },
     { name = "eodhd", specifier = ">=1.0.32" },
     { name = "feedparser", specifier = ">=6.0.11" },
-    { name = "finnhub-python", specifier = ">=2.4.23" },
+    { name = "finnhub-python", specifier = ">=2.4.24" },
     { name = "langchain-anthropic", specifier = ">=0.3.15" },
     { name = "langchain-experimental", specifier = ">=0.3.4" },
     { name = "langchain-google-genai", specifier = ">=2.1.5" },
@@ -4738,6 +4739,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.3.0" },
     { name = "parsel", specifier = ">=1.10.0" },
     { name = "praw", specifier = ">=7.8.1" },
+    { name = "python-dotenv", specifier = ">=1.1.0" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=2.1.0" },
     { name = "redis", specifier = ">=6.2.0" },
