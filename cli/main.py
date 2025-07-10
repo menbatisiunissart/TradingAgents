@@ -1,3 +1,17 @@
+from dotenv import load_dotenv, find_dotenv
+import os
+
+# <-- right here, load the .env (searching upwards automatically)
+load_dotenv(find_dotenv())
+
+# DEBUG prints to confirm
+print("🔑 FINNHUB_API_KEY loaded?", bool(os.getenv("FINNHUB_API_KEY")))
+openai_key = os.getenv("OPENAI_API_KEY")
+if openai_key:
+    print("🔑 OPENAI_API_KEY:", openai_key[:5], "…(len", len(openai_key), ")")
+else:
+    print("❌ OPENAI_API_KEY not found")
+
 from typing import Optional
 import datetime
 import typer
