@@ -1,4 +1,5 @@
 import chromadb
+from chromadb import errors as chroma_errors
 from chromadb.config import Settings
 from openai import OpenAI
 
@@ -11,6 +12,14 @@ class FinancialSituationMemory:
             self.embedding = "text-embedding-3-small"
         self.client = OpenAI(base_url=config["backend_url"])
         self.chroma_client = chromadb.Client(Settings(allow_reset=True))
+
+        try:
+            # Ensure we start from a clean slate so sequential CLI runs don't share state.
+            self.chroma_client.delete_collection(name=name)
+        except chroma_errors.NotFoundError:
+            # It's expected that the collection is missing on the first run.
+            pass
+
         self.situation_collection = self.chroma_client.create_collection(name=name)
 
     def get_embedding(self, text):
