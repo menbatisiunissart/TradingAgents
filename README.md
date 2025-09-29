@@ -101,15 +101,24 @@ git clone https://github.com/TauricResearch/TradingAgents.git
 cd TradingAgents
 ```
 
-Create a virtual environment in any of your favorite environment managers:
+### Environment setup with `uv`
+
+We recommend using [`uv`](https://docs.astral.sh/uv/) to manage Python, the
+virtual environment, and project dependencies. If you have not installed `uv`
+yet, follow the
+[official instructions](https://docs.astral.sh/uv/getting-started/installation/)
+for your platform.
+
+Create and activate the project environment:
 ```bash
-conda create -n tradingagents python=3.13
-conda activate tradingagents
+uv python install 3.13
+uv venv
+source .venv/bin/activate
 ```
 
-Install dependencies:
+Install dependencies declared in `pyproject.toml` and `requirements.txt`:
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ### Required APIs
@@ -128,7 +137,7 @@ export OPENAI_API_KEY=$YOUR_OPENAI_API_KEY
 
 You can also try out the CLI directly by running:
 ```bash
-python -m cli.main
+uv run python -m cli.main
 ```
 You will see a screen where you can select your desired tickers, date, LLMs, research depth, etc.
 
