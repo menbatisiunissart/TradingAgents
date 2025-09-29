@@ -155,6 +155,32 @@ An interface will appear showing results as they load, letting you track the age
   <img src="assets/cli/cli_transaction.png" width="100%" style="display: inline-block; margin: 0 2%;">
 </p>
 
+### Batch CLI Runs
+
+For large backtests or regression suites you can programmatically drive the CLI using
+`cli.batch_runner`. The helper wraps the interactive prompts and lets you pass in a list of
+jobs. Each job should include a `ticker` and `analysis_date`, and you can optionally supply the
+same parameters available in the interactive session (e.g., analysts to include, research depth,
+or model overrides).
+
+```python
+from cli.batch_runner import run_batch
+
+jobs = [
+    {"ticker": "SPY", "analysis_date": "2024-01-05", "research_depth": 1},
+    {
+        "ticker": "AAPL",
+        "analysis_date": "2024-02-01",
+        "config_overrides": {"quick_think_llm": "gpt-4.1-mini"},
+    },
+]
+
+run_batch(jobs, pause_seconds=2.0)
+```
+
+This will sequentially execute the CLI for each configuration, resetting the internal state
+between runs and waiting two seconds between jobs (helpful for rate limits).
+
 ## TradingAgents Package
 
 ### Implementation Details
