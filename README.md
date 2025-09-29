@@ -158,28 +158,30 @@ An interface will appear showing results as they load, letting you track the age
 ### Batch CLI Runs
 
 For large backtests or regression suites you can programmatically drive the CLI using
-`cli.batch_runner`. The helper wraps the interactive prompts and lets you pass in a list of
-jobs. Each job should include a `ticker` and `analysis_date`, and you can optionally supply the
-same parameters available in the interactive session (e.g., analysts to include, research depth,
-or model overrides).
+`cli.batch_runner`. The helper wraps the interactive prompts and lets you iterate over a list of
+tickers for a shared date range. Every ticker in the batch is evaluated for each date between the
+start and end (inclusive) using the same research depth and optional runtime overrides you pass.
 
 ```python
 from cli.batch_runner import run_batch
 
-jobs = [
-    {"ticker": "SPY", "analysis_date": "2024-01-05", "research_depth": 1},
-    {
-        "ticker": "AAPL",
-        "analysis_date": "2024-02-01",
-        "config_overrides": {"quick_think_llm": "gpt-4.1-mini"},
-    },
-]
-
-run_batch(jobs, pause_seconds=2.0)
+run_batch(
+    tickers=["SPY", "AAPL"],
+    start_date="2024-01-05",
+    end_date="2024-01-07",
+    research_depth=2,
+    shallow_thinker="gpt-4.1-mini",
+    pause_seconds=2.0,
+)
 ```
 
-This will sequentially execute the CLI for each configuration, resetting the internal state
-between runs and waiting two seconds between jobs (helpful for rate limits).
+This will sequentially execute the CLI for each ticker/date combination, resetting the internal
+state between runs and waiting two seconds between jobs (helpful for rate limits).
+
+You can also kick off the batch runner from the command line:
+```bash
+uv run python -m cli.batch_runner
+```
 
 ## TradingAgents Package
 
