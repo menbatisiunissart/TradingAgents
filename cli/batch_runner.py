@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as _dt
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, Iterable, Iterator, List, Mapping, MutableMapping, Optional, Sequence, Union
+from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Union
 from unittest.mock import patch
 
 from cli import main as cli_main
@@ -24,6 +24,31 @@ def _normalize_date(value: Union[str, _dt.date]) -> str:
     if isinstance(value, _dt.date):
         return value.strftime("%Y-%m-%d")
     return str(value)
+
+
+def _coerce_to_date(value: Union[str, _dt.date]) -> _dt.date:
+    """Convert a string or date value into a :class:`datetime.date` instance."""
+    if isinstance(value, _dt.date):
+        return value
+    try:
+        return _dt.date.fromisoformat(str(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "Dates must be provided as datetime.date instances or ISO formatted strings"
+        ) from exc
+
+
+def _iterate_dates(start_date: Union[str, _dt.date], end_date: Union[str, _dt.date]) -> Iterator[_dt.date]:
+    """Yield every date between ``start_date`` and ``end_date`` (inclusive)."""
+    start = _coerce_to_date(start_date)
+    end = _coerce_to_date(end_date)
+    if end < start:
+        raise ValueError("'end_date' must be on or after 'start_date'.")
+
+    current = start
+    while current <= end:
+        yield current
+        current += _dt.timedelta(days=1)
 
 
 def _normalize_analysts(analysts: Optional[Sequence[AnalystInput]]) -> List[AnalystType]:
@@ -95,62 +120,92 @@ def _reset_message_buffer() -> None:
 
 
 def run_batch(
-    jobs: Iterable[Mapping[str, Any]],
     *,
+    tickers: Sequence[str],
+    start_date: Union[str, _dt.date],
+    end_date: Union[str, _dt.date],
+    research_depth: Optional[int] = None,
+    analysts: Optional[Sequence[AnalystInput]] = None,
+    llm_provider: Optional[str] = None,
+    backend_url: Optional[str] = None,
+    shallow_thinker: Optional[str] = None,
+    deep_thinker: Optional[str] = None,
     pause_seconds: float = 0.0,
 ) -> None:
-    """Run the CLI sequentially for each provided job configuration.
+    """Run the CLI sequentially for each ticker across a shared date range.
 
     Parameters
     ----------
-    jobs:
-        Iterable of configuration mappings. Each mapping can contain the following keys:
-        ``ticker`` (required), ``analysis_date`` (required), ``analysts``, ``research_depth``,
-        ``llm_provider``, ``backend_url``, ``shallow_thinker``, ``deep_thinker``, and
-        ``config_overrides``. The ``config_overrides`` value, when provided, should be a mapping
-        that updates the default configuration used by the CLI before applying selections.
-    pause_seconds:
-        Optional pause between runs. This can be useful to respect API rate limits.
+    tickers
+        Ordered collection of ticker symbols to process.
+    start_date
+        Inclusive beginning of the analysis window shared by all tickers.
+    end_date
+        Inclusive end of the analysis window shared by all tickers.
+    research_depth
+        Optional debate depth to reuse for each run; falls back to config when ``None``.
+    analysts
+        Optional list of analysts to include. Defaults to the CLI's standard set when omitted.
+    llm_provider
+        Override for the LLM provider; defaults to the CLI configuration.
+    backend_url
+        Override for the backend service endpoint required by the CLI.
+    shallow_thinker
+        Name of the quick-think LLM to use for every run.
+    deep_thinker
+        Name of the deep-think LLM to use for every run.
+    pause_seconds
+        Delay inserted between runs to avoid hammering downstream services.
+
+    The provided ``start_date`` and ``end_date`` are applied to every ticker in ``tickers``.
+    ``research_depth`` (when provided) is likewise reused for each run.
     """
-    job_list = list(jobs)
 
-    for index, job in enumerate(job_list, start=1):
-        if "ticker" not in job or "analysis_date" not in job:
-            raise ValueError("Each job must include 'ticker' and 'analysis_date'.")
+    if not tickers:
+        raise ValueError("'tickers' must be a non-empty sequence of symbols.")
 
-        overrides: MutableMapping[str, Any] = {}
-        overrides.update(cli_main.DEFAULT_CONFIG)
-        overrides.update(job.get("config_overrides", {}))
+    dates = list(_iterate_dates(start_date, end_date))
 
-        selections = _build_selections(
-            ticker=str(job["ticker"]),
-            analysis_date=job["analysis_date"],
-            analysts=job.get("analysts"),
-            research_depth=job.get("research_depth"),
-            llm_provider=job.get("llm_provider"),
-            backend_url=job.get("backend_url"),
-            shallow_thinker=job.get("shallow_thinker"),
-            deep_thinker=job.get("deep_thinker"),
-            base_config=overrides,
-        )
+    defaults: Mapping[str, Any] = dict(cli_main.DEFAULT_CONFIG)
 
-        _reset_message_buffer()
+    total_runs = len(tickers) * len(dates)
+    run_index = 0
 
-        with _patched_defaults(dict(overrides)), patch(
-            "cli.main.get_user_selections", return_value=selections
-        ):
-            cli_main.run_analysis()
+    for ticker in tickers:
+        for analysis_date in dates:
+            run_index += 1
 
-        if pause_seconds and index < len(job_list):
-            time.sleep(pause_seconds)
+            selections = _build_selections(
+                ticker=str(ticker),
+                analysis_date=analysis_date,
+                analysts=analysts,
+                research_depth=research_depth,
+                llm_provider=llm_provider,
+                backend_url=backend_url,
+                shallow_thinker=shallow_thinker,
+                deep_thinker=deep_thinker,
+                base_config=defaults,
+            )
+
+            _reset_message_buffer()
+
+            with _patched_defaults(dict(defaults)), patch(
+                "cli.main.get_user_selections", return_value=selections
+            ):
+                cli_main.run_analysis()
+
+            if pause_seconds and run_index < total_runs:
+                time.sleep(pause_seconds)
 
 
 __all__ = ["run_batch"]
 
 
 if __name__ == "__main__":
-    example_jobs = [
-        {"ticker": "SPY", "analysis_date": "2024-01-05", "research_depth": 1},
-        {"ticker": "AAPL", "analysis_date": "2024-02-01", "research_depth": 3},
-    ]
-    run_batch(example_jobs)
+    run_batch(
+        tickers=["SPY", "AAPL"],
+        start_date="2024-01-05",
+        end_date="2024-01-06",
+        research_depth=2,
+        pause_seconds=1.0,
+    )
