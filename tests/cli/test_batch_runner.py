@@ -95,9 +95,22 @@ def test_build_selections_merges_expected_defaults():
 
 def test_run_batch_validates_mandatory_fields():
     with pytest.raises(ValueError) as exc:
-        batch_runner.run_batch([{"ticker": "SPY"}])
+        batch_runner.run_batch(
+            tickers=[],
+            start_date="2024-01-01",
+            end_date="2024-01-02",
+        )
 
-    assert "analysis_date" in str(exc.value)
+    assert "tickers" in str(exc.value)
+
+    with pytest.raises(ValueError) as exc:
+        batch_runner.run_batch(
+            tickers=["SPY"],
+            start_date="2024-01-05",
+            end_date="2024-01-01",
+        )
+
+    assert "end_date" in str(exc.value)
 
 
 def test_run_batch_applies_overrides_and_resets(monkeypatch):
@@ -138,47 +151,55 @@ def test_run_batch_applies_overrides_and_resets(monkeypatch):
     sentinel_buffer = object()
     cli_main.message_buffer = sentinel_buffer
 
-    jobs = [
-        {"ticker": "spy", "analysis_date": "2024-01-01", "research_depth": 5},
-        {
-            "ticker": "QQQ",
-            "analysis_date": dt.date(2024, 2, 1),
-            "llm_provider": "Anthropic",
-            "analysts": ["market", AnalystType.NEWS],
-            "config_overrides": {
-                "backend_url": "override-url",
-                "quick_think_llm": "fast",
-            },
-        },
+    batch_runner.run_batch(
+        tickers=["spy", "QQQ"],
+        start_date=dt.date(2024, 1, 1),
+        end_date="2024-01-02",
+        research_depth=5,
+        analysts=["market", AnalystType.NEWS],
+        llm_provider="Anthropic",
+        backend_url="override-url",
+        shallow_thinker="fast",
+        pause_seconds=0.25,
+    )
+
+    assert len(calls) == 4
+    assert sleep_calls == [0.25, 0.25, 0.25]
+
+    for call in calls:
+        defaults = call["defaults"]
+        assert defaults["backend_url"] == "base-url"
+        assert defaults["quick_think_llm"] == "quick"
+
+        selections = call["selections"]
+        assert selections["research_depth"] == 5
+        assert selections["llm_provider"] == "anthropic"
+        assert selections["backend_url"] == "override-url"
+        assert selections["shallow_thinker"] == "fast"
+        assert selections["analysts"] == [
+            AnalystType.MARKET,
+            AnalystType.NEWS,
+        ]
+
+    seen_runs = [
+        (call["selections"]["ticker"], call["selections"]["analysis_date"])
+        for call in calls
     ]
 
-    batch_runner.run_batch(jobs, pause_seconds=0.25)
-
-    assert len(calls) == 2
-    assert sleep_calls == [0.25]
-
-    first_defaults = calls[0]["defaults"]
-    second_defaults = calls[1]["defaults"]
-
-    assert first_defaults["backend_url"] == "base-url"
-    assert first_defaults["quick_think_llm"] == "quick"
-    assert second_defaults["backend_url"] == "override-url"
-    assert second_defaults["quick_think_llm"] == "fast"
-
-    assert calls[0]["selections"]["ticker"] == "SPY"
-    assert calls[0]["selections"]["research_depth"] == 5
-    assert calls[1]["selections"]["analysis_date"] == "2024-02-01"
-    assert calls[1]["selections"]["llm_provider"] == "anthropic"
-    assert calls[1]["selections"]["analysts"] == [
-        AnalystType.MARKET,
-        AnalystType.NEWS,
+    assert seen_runs == [
+        ("SPY", "2024-01-01"),
+        ("SPY", "2024-01-02"),
+        ("QQQ", "2024-01-01"),
+        ("QQQ", "2024-01-02"),
     ]
 
-    assert calls[0]["buffer_type"] is cli_main.MessageBuffer
-    assert calls[1]["buffer_type"] is cli_main.MessageBuffer
-    assert calls[0]["buffer_id"] != id(sentinel_buffer)
-    assert calls[0]["buffer_id"] != calls[1]["buffer_id"]
+    buffer_ids = [call["buffer_id"] for call in calls]
+    assert all(buf_id != id(sentinel_buffer) for buf_id in buffer_ids)
+    assert all(
+        buffer_ids[index] != buffer_ids[index - 1]
+        for index in range(1, len(buffer_ids))
+    )
+    assert all(call["buffer_type"] is cli_main.MessageBuffer for call in calls)
 
     # DEFAULT_CONFIG should be restored after the run
     assert cli_main.DEFAULT_CONFIG == base_config.copy()
-
