@@ -178,9 +178,10 @@ run_batch(
 This will sequentially execute the CLI for each ticker/date combination, resetting the internal
 state between runs and waiting two seconds between jobs (helpful for rate limits).
 
-You can also kick off the batch runner from the command line:
+Drop the run parameters into a YAML file under `config/`, for example `config/batch_runner.yaml`,
+and execute the helper via `uv`:
 ```bash
-uv run python -m cli.batch_runner
+uv run python -m cli.batch_runner config/batch_runner.yaml
 ```
 
 ## TradingAgents Package

@@ -7,11 +7,16 @@ manually answering the interactive prompts each time.
 
 from __future__ import annotations
 
+import argparse
 import datetime as _dt
+import sys
 import time
+from pathlib import Path
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Union
 from unittest.mock import patch
+
+import yaml
 
 from cli import main as cli_main
 from cli.models import AnalystType
@@ -119,6 +124,55 @@ def _reset_message_buffer() -> None:
     cli_main.message_buffer = cli_main.MessageBuffer()
 
 
+def load_batch_config(config_path: Union[str, Path]) -> Dict[str, Any]:
+    """Read a YAML batch configuration and return a dictionary of run options."""
+    path = Path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Config file not found: {path}")
+
+    with path.open("r", encoding="utf-8") as handle:
+        data = yaml.safe_load(handle) or {}
+
+    if not isinstance(data, Mapping):
+        raise ValueError("Batch configuration must be a mapping of option names to values.")
+
+    options = dict(data)
+    allowed_keys = {
+        "tickers",
+        "start_date",
+        "end_date",
+        "research_depth",
+        "analysts",
+        "llm_provider",
+        "backend_url",
+        "shallow_thinker",
+        "deep_thinker",
+        "pause_seconds",
+    }
+
+    unexpected = sorted(set(options) - allowed_keys)
+    if unexpected:
+        raise ValueError(
+            "Unexpected configuration keys: " + ", ".join(unexpected)
+        )
+
+    missing = [key for key in ("tickers", "start_date", "end_date") if key not in options]
+    if missing:
+        raise ValueError(
+            "Missing required configuration keys: " + ", ".join(missing)
+        )
+
+    tickers = options.get("tickers")
+    if isinstance(tickers, str):
+        options["tickers"] = [tickers]
+
+    analysts = options.get("analysts")
+    if isinstance(analysts, str):
+        options["analysts"] = [analysts]
+
+    return options
+
+
 def run_batch(
     *,
     tickers: Sequence[str],
@@ -198,14 +252,33 @@ def run_batch(
                 time.sleep(pause_seconds)
 
 
-__all__ = ["run_batch"]
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Run the TradingAgents CLI across a batch of tickers using a YAML config."
+    )
+    parser.add_argument(
+        "config",
+        help="Path to the YAML file containing the batch runner parameters.",
+    )
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    """Entrypoint for running batch jobs via ``python -m cli.batch_runner``."""
+
+    parser = _build_arg_parser()
+    args = parser.parse_args(argv)
+
+    options = load_batch_config(args.config)
+    run_batch(**options)
+
+
+__all__ = ["load_batch_config", "main", "run_batch"]
 
 
 if __name__ == "__main__":
-    run_batch(
-        tickers=["SPY", "AAPL"],
-        start_date="2024-01-05",
-        end_date="2024-01-06",
-        research_depth=2,
-        pause_seconds=1.0,
-    )
+    try:
+        main(sys.argv[1:])
+    except Exception as exc:  # pragma: no cover - defensive guard for CLI usage
+        parser = _build_arg_parser()
+        parser.error(str(exc))

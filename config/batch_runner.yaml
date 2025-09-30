@@ -1,0 +1,16 @@
+# Example configuration for cli.batch_runner
+# Adjust the parameters to fit your batch workload.
+tickers:
+  - SPY
+  - AAPL
+start_date: 2024-01-05
+end_date: 2024-01-06
+research_depth: 2
+# analysts:
+#   - market
+#   - news
+# llm_provider: openai
+# backend_url: http://localhost:8000
+# shallow_thinker: gpt-4.1-mini
+# deep_thinker: gpt-4o
+pause_seconds: 1.0
