@@ -1,4 +1,5 @@
 import datetime as dt
+from pathlib import Path
 
 import pytest
 
@@ -203,3 +204,74 @@ def test_run_batch_applies_overrides_and_resets(monkeypatch):
 
     # DEFAULT_CONFIG should be restored after the run
     assert cli_main.DEFAULT_CONFIG == base_config.copy()
+
+
+def test_load_batch_config_reads_yaml(tmp_path: Path):
+    config_path = tmp_path / "batch.yaml"
+    config_path.write_text(
+        """
+tickers: SPY
+start_date: 2024-01-05
+end_date: 2024-01-07
+analysts: market
+pause_seconds: 0.5
+""".strip()
+    )
+
+    options = batch_runner.load_batch_config(config_path)
+
+    assert options["tickers"] == ["SPY"]
+    assert options["start_date"] == dt.date(2024, 1, 5)
+    assert options["end_date"] == dt.date(2024, 1, 7)
+    assert options["analysts"] == ["market"]
+    assert options["pause_seconds"] == 0.5
+
+
+def test_load_batch_config_validates_keys(tmp_path: Path):
+    config_path = tmp_path / "missing.yaml"
+    config_path.write_text("tickers: []\n")
+
+    with pytest.raises(ValueError) as exc:
+        batch_runner.load_batch_config(config_path)
+
+    assert "start_date" in str(exc.value)
+
+    config_path.write_text(
+        """
+tickers:
+  - SPY
+start_date: 2024-01-05
+end_date: 2024-01-06
+extra_field: nope
+""".strip()
+    )
+
+    with pytest.raises(ValueError) as exc:
+        batch_runner.load_batch_config(config_path)
+
+    assert "Unexpected configuration keys" in str(exc.value)
+
+
+def test_main_dispatches_to_run_batch(monkeypatch, tmp_path: Path):
+    config_path = tmp_path / "batch.yaml"
+    config_path.write_text(
+        """
+tickers:
+  - SPY
+start_date: 2024-01-05
+end_date: 2024-01-06
+""".strip()
+    )
+
+    captured = {}
+
+    def fake_run_batch(**options):
+        captured.update(options)
+
+    monkeypatch.setattr(batch_runner, "run_batch", fake_run_batch)
+
+    batch_runner.main([str(config_path)])
+
+    assert captured["tickers"] == ["SPY"]
+    assert captured["start_date"] == dt.date(2024, 1, 5)
+    assert captured["end_date"] == dt.date(2024, 1, 6)
