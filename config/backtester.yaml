@@ -1,0 +1,24 @@
+# Sample configuration for cli.backtester
+# Adjust paths and broker settings to match your data environment.
+decisions_csv: results/decisions.csv
+
+# Optionally pad the requested history window on each side (in calendar days).
+price_padding_days: 5
+
+# Override column names returned by yfinance if needed.
+price_data_columns:
+  open_col: Open
+  high_col: High
+  low_col: Low
+  close_col: Close
+  volume_col: Volume
+
+cash: 100000
+commission: 0.001
+stake: 10
+hold_value: HOLD
+buy_value: BUY
+sell_value: SELL
+
+# Persist a summary CSV of per-ticker performance (optional)
+output_csv: results/backtests.csv
