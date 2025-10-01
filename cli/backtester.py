@@ -6,7 +6,9 @@ Price candles are fetched dynamically through :class:`tradingagents.dataflows.yf
 instead of relying on static CSV snapshots. Configuration details (decision
 file path, broker parameters, history padding, evaluation metric knobs, etc.)
 are specified in a YAML file to keep the backtesting logic isolated from the
-interactive CLI workflow.
+interactive CLI workflow. The exported CSV includes a ``model`` column that
+identifies either the TradingAgents run or one of the baseline strategies
+evaluated for comparison.
 
 Example
 -------
@@ -25,6 +27,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import statistics
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -201,6 +204,258 @@ def _compute_performance_metrics(
     }
 
 
+def _build_signal_series(price_frame: pd.DataFrame, decisions: Mapping[dt.date, str]) -> pd.Series:
+    signals = []
+    for index, _ in price_frame.iterrows():
+        signals.append(decisions.get(index.date(), "HOLD"))
+    return pd.Series(signals, index=price_frame.index)
+
+
+def _simulate_decision_series(
+    price_frame: pd.DataFrame,
+    decisions: Mapping[dt.date, str],
+    *,
+    initial_cash: float,
+    commission: float,
+) -> Dict[str, Any]:
+    if price_frame.empty:
+        return {
+            "final_value": initial_cash,
+            "trades": 0,
+            "returns": OrderedDict(),
+            "max_drawdown": None,
+        }
+
+    cash = initial_cash
+    position = 0.0
+    trades = 0
+    portfolio_values: List[float] = []
+
+    for index, row in price_frame.iterrows():
+        decision = decisions.get(index.date(), "HOLD")
+        close_price = float(row["Close"])
+
+        if decision == "BUY" and position == 0 and close_price > 0:
+            investable_cash = cash * (1 - commission)
+            position = investable_cash / close_price
+            cash = 0.0
+            trades += 1
+        elif decision == "SELL" and position > 0 and close_price > 0:
+            proceeds = position * close_price * (1 - commission)
+            cash = proceeds
+            position = 0.0
+            trades += 1
+
+        portfolio_values.append(cash + position * close_price)
+
+    if position > 0:
+        final_price = float(price_frame["Close"].iloc[-1])
+        portfolio_values[-1] = cash + position * final_price
+
+    portfolio_series = pd.Series(portfolio_values, index=price_frame.index)
+    returns_series = portfolio_series.pct_change().dropna()
+    returns_mapping = OrderedDict((ts.to_pydatetime(), value) for ts, value in returns_series.items())
+
+    cumulative_max = portfolio_series.cummax()
+    drawdowns = (1.0 - (portfolio_series / cumulative_max)) * 100.0
+    if drawdowns.empty:
+        max_drawdown = None
+    else:
+        max_drawdown_value = drawdowns.max()
+        max_drawdown = (
+            float(max_drawdown_value) if pd.notna(max_drawdown_value) else None
+        )
+
+    return {
+        "final_value": float(portfolio_series.iloc[-1]),
+        "trades": trades,
+        "returns": returns_mapping,
+        "max_drawdown": max_drawdown,
+    }
+
+
+def _baseline_buy_and_hold(
+    price_frame: pd.DataFrame,
+) -> Dict[dt.date, str]:
+    if price_frame.empty:
+        return {}
+    signals: Dict[dt.date, str] = {}
+    first_date = price_frame.index[0].date()
+    last_date = price_frame.index[-1].date()
+    signals[first_date] = "BUY"
+    signals[last_date] = "SELL"
+    return signals
+
+
+def _baseline_macd(price_frame: pd.DataFrame) -> Dict[dt.date, str]:
+    signals: Dict[dt.date, str] = {}
+    if price_frame.empty:
+        return signals
+
+    close = price_frame["Close"].astype(float)
+    ema_short = close.ewm(span=12, adjust=False).mean()
+    ema_long = close.ewm(span=26, adjust=False).mean()
+    macd = ema_short - ema_long
+    signal_line = macd.ewm(span=9, adjust=False).mean()
+
+    prev_diff = None
+    for timestamp, diff in (macd - signal_line).items():
+        current_date = timestamp.date()
+        if pd.isna(diff) or (prev_diff is None):
+            prev_diff = diff
+            continue
+        if diff > 0 and prev_diff <= 0:
+            signals[current_date] = "BUY"
+        elif diff < 0 and prev_diff >= 0:
+            signals[current_date] = "SELL"
+        prev_diff = diff
+    return signals
+
+
+def _baseline_kdj_rsi(price_frame: pd.DataFrame) -> Dict[dt.date, str]:
+    signals: Dict[dt.date, str] = {}
+    if price_frame.empty:
+        return signals
+
+    high = price_frame["High"].astype(float)
+    low = price_frame["Low"].astype(float)
+    close = price_frame["Close"].astype(float)
+
+    period = 9
+    low_min = low.rolling(window=period, min_periods=period).min()
+    high_max = high.rolling(window=period, min_periods=period).max()
+    rsv = (close - low_min) / (high_max - low_min) * 100
+    rsv = rsv.replace([pd.NA, pd.NaT, float("inf"), float("-inf")], 0).fillna(0)
+
+    k = rsv.ewm(alpha=1 / 3, adjust=False).mean()
+    d = k.ewm(alpha=1 / 3, adjust=False).mean()
+
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / 14, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / 14, adjust=False).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+
+    prev_cross = None
+    for timestamp, (k_val, d_val, rsi_val) in zip(k.index, zip(k, d, rsi)):
+        if pd.isna(k_val) or pd.isna(d_val) or pd.isna(rsi_val):
+            continue
+        diff = k_val - d_val
+        current_date = timestamp.date()
+        if prev_cross is None:
+            prev_cross = diff
+            continue
+        if diff > 0 and prev_cross <= 0 and rsi_val < 30:
+            signals[current_date] = "BUY"
+        elif diff < 0 and prev_cross >= 0 and rsi_val > 70:
+            signals[current_date] = "SELL"
+        prev_cross = diff
+    return signals
+
+
+def _baseline_zmr(price_frame: pd.DataFrame) -> Dict[dt.date, str]:
+    signals: Dict[dt.date, str] = {}
+    if price_frame.empty:
+        return signals
+
+    close = price_frame["Close"].astype(float)
+    rolling = close.rolling(window=20, min_periods=20)
+    mean = rolling.mean()
+    std = rolling.std()
+    zscore = (close - mean) / std
+
+    prev_state = 0
+    for timestamp, z_val in zscore.items():
+        if pd.isna(z_val):
+            continue
+        current_date = timestamp.date()
+        if z_val < -1 and prev_state >= 0:
+            signals[current_date] = "BUY"
+            prev_state = -1
+        elif z_val > 0.5 and prev_state <= 0:
+            signals[current_date] = "SELL"
+            prev_state = 1
+    return signals
+
+
+def _baseline_sma(price_frame: pd.DataFrame) -> Dict[dt.date, str]:
+    signals: Dict[dt.date, str] = {}
+    if price_frame.empty:
+        return signals
+
+    close = price_frame["Close"].astype(float)
+    short = close.rolling(window=20, min_periods=20).mean()
+    long = close.rolling(window=50, min_periods=50).mean()
+    prev_diff = None
+    for timestamp, (short_val, long_val) in zip(short.index, zip(short, long)):
+        if pd.isna(short_val) or pd.isna(long_val):
+            continue
+        diff = short_val - long_val
+        current_date = timestamp.date()
+        if prev_diff is None:
+            prev_diff = diff
+            continue
+        if diff > 0 and prev_diff <= 0:
+            signals[current_date] = "BUY"
+        elif diff < 0 and prev_diff >= 0:
+            signals[current_date] = "SELL"
+        prev_diff = diff
+    return signals
+
+
+def _evaluate_baselines(
+    *,
+    price_frame: pd.DataFrame,
+    initial_cash: float,
+    commission: float,
+    start_date: dt.date,
+    end_date: dt.date,
+    risk_free_rate: float,
+    periods_per_year: int,
+) -> List[Dict[str, Any]]:
+    baseline_builders = {
+        "Buy and Hold": _baseline_buy_and_hold,
+        "MACD": _baseline_macd,
+        "KDJ+RSI": _baseline_kdj_rsi,
+        "ZMR": _baseline_zmr,
+        "SMA": _baseline_sma,
+    }
+
+    results: List[Dict[str, Any]] = []
+    for model_name, builder in baseline_builders.items():
+        decisions = builder(price_frame)
+        simulation = _simulate_decision_series(
+            price_frame,
+            decisions,
+            initial_cash=initial_cash,
+            commission=commission,
+        )
+        metrics = _compute_performance_metrics(
+            initial_cash=initial_cash,
+            final_value=simulation["final_value"],
+            start_date=start_date,
+            end_date=end_date,
+            daily_returns=simulation["returns"],
+            risk_free_rate=risk_free_rate,
+            periods_per_year=periods_per_year,
+            drawdown_analysis={"maxdrawdown": simulation.get("max_drawdown")},
+        )
+
+        results.append(
+            {
+                "model": model_name,
+                "starting_cash": initial_cash,
+                "ending_value": simulation["final_value"],
+                "return_pct": ((simulation["final_value"] / initial_cash) - 1.0) * 100.0,
+                "trades_executed": simulation["trades"],
+                **metrics,
+            }
+        )
+    return results
+
+
 def _normalize_decisions(
     decisions: Iterable[Mapping[str, Any]],
     *,
@@ -245,6 +500,8 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
     stake = int(config.get("stake", 1))
     padding_days = int(config.get("price_padding_days", 0))
     column_config = config.get("price_data_columns") or {}
+    risk_free_rate = float(config.get("risk_free_rate", 0.0))
+    periods_per_year = int(config.get("trading_days_per_year", 252))
 
     results: List[Dict[str, Any]] = []
     for ticker, ticker_decisions in grouped_decisions.items():
@@ -289,9 +546,6 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
         returns_analysis = strategy.analyzers.returns.get_analysis()
         drawdown_analysis = strategy.analyzers.drawdown.get_analysis()
 
-        risk_free_rate = float(config.get("risk_free_rate", 0.0))
-        periods_per_year = int(config.get("trading_days_per_year", 252))
-
         metrics = _compute_performance_metrics(
             initial_cash=initial_cash,
             final_value=final_value,
@@ -305,6 +559,7 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
 
         results.append(
             {
+                "model": "TradingAgents",
                 "ticker": ticker,
                 "starting_cash": initial_cash,
                 "ending_value": final_value,
@@ -313,6 +568,20 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
                 **metrics,
             }
         )
+
+        baseline_rows = _evaluate_baselines(
+            price_frame=price_frame,
+            initial_cash=initial_cash,
+            commission=commission,
+            start_date=start_date,
+            end_date=end_date,
+            risk_free_rate=risk_free_rate,
+            periods_per_year=periods_per_year,
+        )
+
+        for row in baseline_rows:
+            row.update({"ticker": ticker})
+            results.append(row)
 
     return results
 
@@ -329,6 +598,9 @@ def write_results(results: List[Dict[str, Any]], config: Mapping[str, Any], base
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     frame = pd.DataFrame(results)
+    desired_order = ["ticker", "model"]
+    remaining_columns = [col for col in frame.columns if col not in desired_order]
+    frame = frame[[*desired_order, *remaining_columns]]
     frame.to_csv(output_path, index=False)
 
 

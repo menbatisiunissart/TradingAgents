@@ -25,5 +25,5 @@ hold_value: HOLD
 buy_value: BUY
 sell_value: SELL
 
-# Persist a summary CSV of per-ticker performance (optional)
+# Persist a summary CSV of per-ticker/model performance (TradingAgents + baselines)
 output_csv: results/backtests.csv
