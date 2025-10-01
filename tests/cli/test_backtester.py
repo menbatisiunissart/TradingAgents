@@ -1,5 +1,5 @@
 import datetime as dt
-from pathlib import Path
+import statistics
 
 import pandas as pd
 import pytest
@@ -54,12 +54,20 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
         def getvalue(self):
             return self.value
 
+    class DummyAnalyzer:
+        def __init__(self, data):
+            self._data = data
+
+        def get_analysis(self):
+            return self._data
+
     class DummyCerebro:
         def __init__(self):
             self.broker = DummyBroker()
             self.sizers = []
             self.data = []
             self.strategy = None
+            self.analyzer_specs = []
             created_cerebros.append(self)
 
         def addsizer(self, sizer_cls, **kwargs):
@@ -71,9 +79,27 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
         def addstrategy(self, strategy_cls, **kwargs):
             self.strategy = (strategy_cls, kwargs)
 
+        def addanalyzer(self, analyzer_cls, *args, **kwargs):
+            self.analyzer_specs.append(kwargs.get("_name"))
+
         def run(self):
             self.broker.value = (self.broker.cash or 0) + 123.45
-            return []
+            analyzers_container = type("Analyzers", (), {})()
+
+            returns_data = {
+                dt.datetime(2024, 1, 2): 0.01,
+                dt.datetime(2024, 1, 3): -0.005,
+            }
+            drawdown_data = {"maxdrawdown": 12.0}
+
+            for name in self.analyzer_specs:
+                if name == "returns":
+                    setattr(analyzers_container, name, DummyAnalyzer(returns_data))
+                elif name == "drawdown":
+                    setattr(analyzers_container, name, DummyAnalyzer(drawdown_data))
+
+            strategy = type("DummyStrategy", (), {"analyzers": analyzers_container})()
+            return [strategy]
 
     class DummyPandasData:
         def __init__(self, dataname):
@@ -85,6 +111,12 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
     monkeypatch.setattr(backtester.bt, "Cerebro", DummyCerebro)
     monkeypatch.setattr(backtester.bt.feeds, "PandasData", DummyPandasData)
     monkeypatch.setattr(backtester.bt.sizers, "SizerFix", DummySizer)
+    monkeypatch.setattr(backtester.bt, "TimeFrame", type("TimeFrame", (), {"Days": object()}))
+    monkeypatch.setattr(
+        backtester.bt,
+        "analyzers",
+        type("Analyzers", (), {"TimeReturn": object(), "DrawDown": object()}),
+    )
 
     config = {
         "decisions_csv": "decisions.csv",
@@ -93,6 +125,8 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
         "stake": 4,
         "price_padding_days": 3,
         "price_data_columns": {"openinterest_col": "OpenInterest"},
+        "risk_free_rate": 0.02,
+        "trading_days_per_year": 252,
     }
 
     results = backtester.run_backtests(config, base_path=tmp_path)
@@ -105,6 +139,19 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
     assert result["starting_cash"] == 5000
     assert result["ending_value"] == pytest.approx(5123.45)
     assert result["trades_executed"] == 2
+    assert result["cumulative_return"] == pytest.approx(((5123.45 / 5000) - 1.0) * 100.0)
+
+    duration_years = ((dt.date(2024, 1, 3) - dt.date(2024, 1, 2)).days + 1) / 365.25
+    expected_annualized = ((5123.45 / 5000) ** (1.0 / duration_years) - 1.0) * 100.0
+    assert result["annualized_return"] == pytest.approx(expected_annualized)
+
+    returns_series = [0.01, -0.005]
+    expected_sharpe = (
+        (sum(returns_series) / len(returns_series))
+        - (0.02 / 252)
+    ) / statistics.pstdev(returns_series)
+    assert result["sharpe_ratio"] == pytest.approx(expected_sharpe)
+    assert result["max_drawdown"] == pytest.approx(12.0)
 
     assert len(created_cerebros) == 1
     cerebro = created_cerebros[0]
