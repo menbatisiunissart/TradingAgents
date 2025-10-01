@@ -13,6 +13,8 @@ else:
     print("❌ OPENAI_API_KEY not found")
 
 from typing import Optional
+import csv
+import re
 import datetime
 import typer
 from pathlib import Path
@@ -1090,6 +1092,118 @@ def run_analysis():
         # Get final state and decision
         final_state = trace[-1]
         decision = graph.process_signal(final_state["final_trade_decision"])
+
+        def normalize_decision_text(raw_decision: Optional[str]) -> str:
+            if not raw_decision:
+                return ""
+            match = re.search(r"\b(BUY|SELL|HOLD)\b", raw_decision.upper())
+            return match.group(1) if match else raw_decision.strip().upper()
+
+        final_decision = normalize_decision_text(decision)
+
+        def extract_history_block(history_text: Optional[str], prefix: str) -> Optional[str]:
+            if not history_text:
+                return None
+            idx = history_text.rfind(prefix)
+            if idx == -1:
+                cleaned = history_text.strip()
+                return cleaned if cleaned else None
+            return history_text[idx + len(prefix) :].strip()
+
+        def strip_prefix(text: Optional[str], prefix: str) -> Optional[str]:
+            if not text:
+                return None
+            text = text.strip()
+            if text.startswith(prefix):
+                return text[len(prefix) :].strip()
+            return text
+
+        def extract_decision_from_text(text: Optional[str]) -> str:
+            if not text:
+                return ""
+            try:
+                raw = graph.process_signal(text)
+            except Exception as exc:
+                console.print(
+                    f"[red]Failed to extract decision from agent output: {exc}[/red]"
+                )
+                return ""
+            return normalize_decision_text(raw)
+
+        investment_state = final_state.get("investment_debate_state", {})
+        risk_state = final_state.get("risk_debate_state", {})
+
+        agent_outputs = {
+            "market_analyst": final_state.get("market_report"),
+            "social_analyst": final_state.get("sentiment_report"),
+            "news_analyst": final_state.get("news_report"),
+            "fundamentals_analyst": final_state.get("fundamentals_report"),
+            "bull_researcher": extract_history_block(
+                investment_state.get("bull_history"), "Bull Analyst:"
+            ),
+            "bear_researcher": extract_history_block(
+                investment_state.get("bear_history"), "Bear Analyst:"
+            ),
+            "research_manager": investment_state.get("judge_decision")
+            or final_state.get("investment_plan"),
+            "trader": final_state.get("trader_investment_plan"),
+            "risky_analyst": strip_prefix(
+                risk_state.get("current_risky_response"), "Risky Analyst:"
+            ),
+            "safe_analyst": strip_prefix(
+                risk_state.get("current_safe_response"), "Safe Analyst:"
+            ),
+            "neutral_analyst": strip_prefix(
+                risk_state.get("current_neutral_response"), "Neutral Analyst:"
+            ),
+            "portfolio_manager": risk_state.get("judge_decision")
+            or final_state.get("final_trade_decision"),
+        }
+
+        agent_decisions = {
+            agent: extract_decision_from_text(output)
+            for agent, output in agent_outputs.items()
+        }
+        agent_decisions["portfolio_manager"] = normalize_decision_text(
+            agent_decisions.get("portfolio_manager") or final_decision
+        )
+
+        csv_row = {
+            "ticker": selections["ticker"],
+            "analysis_date": selections["analysis_date"],
+            "final_decision": final_decision,
+            "market_analyst": agent_decisions.get("market_analyst", ""),
+            "social_analyst": agent_decisions.get("social_analyst", ""),
+            "news_analyst": agent_decisions.get("news_analyst", ""),
+            "fundamentals_analyst": agent_decisions.get(
+                "fundamentals_analyst", ""
+            ),
+            "bull_researcher": agent_decisions.get("bull_researcher", ""),
+            "bear_researcher": agent_decisions.get("bear_researcher", ""),
+            "research_manager": agent_decisions.get("research_manager", ""),
+            "trader": agent_decisions.get("trader", ""),
+            "risky_analyst": agent_decisions.get("risky_analyst", ""),
+            "safe_analyst": agent_decisions.get("safe_analyst", ""),
+            "neutral_analyst": agent_decisions.get("neutral_analyst", ""),
+            "portfolio_manager": agent_decisions.get("portfolio_manager", ""),
+        }
+
+        decisions_dir = Path(config["results_dir"])
+        decisions_dir.mkdir(parents=True, exist_ok=True)
+        decisions_file = decisions_dir / "decisions.csv"
+        fieldnames = list(csv_row.keys())
+        write_header = not decisions_file.exists()
+
+        with decisions_file.open("a", newline="") as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            if write_header:
+                writer.writeheader()
+            writer.writerow(csv_row)
+
+        message_buffer.add_message(
+            "System",
+            f"Recorded decisions for {selections['ticker']} on {selections['analysis_date']} at {decisions_file}",
+        )
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
