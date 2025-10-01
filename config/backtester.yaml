@@ -12,6 +12,11 @@ price_data_columns:
   low_col: Low
   close_col: Close
   volume_col: Volume
+  # openinterest_col: OpenInterest
+
+# Performance metric parameters.
+risk_free_rate: 0.02            # Annual risk-free rate expressed in decimals.
+trading_days_per_year: 252
 
 cash: 100000
 commission: 0.001

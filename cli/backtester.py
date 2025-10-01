@@ -4,8 +4,9 @@ This module loads BUY/SELL/HOLD decisions exported by ``cli.main`` and
 replays them against historical price data via the Backtrader engine.
 Price candles are fetched dynamically through :class:`tradingagents.dataflows.yfin_utils.YFinanceUtils`
 instead of relying on static CSV snapshots. Configuration details (decision
-file path, broker parameters, history padding, etc.) are specified in a YAML
-file to keep the backtesting logic isolated from the interactive CLI workflow.
+file path, broker parameters, history padding, evaluation metric knobs, etc.)
+are specified in a YAML file to keep the backtesting logic isolated from the
+interactive CLI workflow.
 
 Example
 -------
@@ -23,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import statistics
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -152,6 +154,53 @@ def _dataframe_to_feed(
     return bt.feeds.PandasData(dataname=renamed)
 
 
+def _compute_performance_metrics(
+    *,
+    initial_cash: float,
+    final_value: float,
+    start_date: dt.date,
+    end_date: dt.date,
+    daily_returns: Mapping[Any, float],
+    risk_free_rate: float,
+    periods_per_year: int,
+    drawdown_analysis: Mapping[str, Any],
+) -> Dict[str, Optional[float]]:
+    cumulative_return = ((final_value / initial_cash) - 1.0) * 100.0
+
+    duration_days = max((end_date - start_date).days + 1, 1)
+    duration_years = duration_days / 365.25
+    if duration_years > 0:
+        annualized_return = ((final_value / initial_cash) ** (1.0 / duration_years) - 1.0) * 100.0
+    else:
+        annualized_return = None
+
+    ordered_returns = [value for _, value in sorted(daily_returns.items())]
+    if ordered_returns and abs(ordered_returns[0]) < 1e-12:
+        ordered_returns = ordered_returns[1:]
+
+    sharpe_ratio: Optional[float] = None
+    if ordered_returns:
+        average_return = sum(ordered_returns) / len(ordered_returns)
+        per_period_risk_free = risk_free_rate / max(periods_per_year, 1)
+        if len(ordered_returns) > 1:
+            volatility = statistics.pstdev(ordered_returns)
+        else:
+            volatility = 0.0
+        if volatility:
+            sharpe_ratio = (average_return - per_period_risk_free) / volatility
+
+    max_drawdown = None
+    if drawdown_analysis:
+        max_drawdown = drawdown_analysis.get("maxdrawdown")
+
+    return {
+        "cumulative_return": cumulative_return,
+        "annualized_return": annualized_return,
+        "sharpe_ratio": sharpe_ratio,
+        "max_drawdown": max_drawdown,
+    }
+
+
 def _normalize_decisions(
     decisions: Iterable[Mapping[str, Any]],
     *,
@@ -226,9 +275,33 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
             buy_value=config.get("buy_value", "BUY"),
             sell_value=config.get("sell_value", "SELL"),
         )
+        cerebro.addanalyzer(
+            bt.analyzers.TimeReturn,
+            _name="returns",
+            timeframe=bt.TimeFrame.Days,
+        )
+        cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
 
-        cerebro.run()
+        strategies = cerebro.run()
+        strategy = strategies[0]
         final_value = cerebro.broker.getvalue()
+
+        returns_analysis = strategy.analyzers.returns.get_analysis()
+        drawdown_analysis = strategy.analyzers.drawdown.get_analysis()
+
+        risk_free_rate = float(config.get("risk_free_rate", 0.0))
+        periods_per_year = int(config.get("trading_days_per_year", 252))
+
+        metrics = _compute_performance_metrics(
+            initial_cash=initial_cash,
+            final_value=final_value,
+            start_date=start_date,
+            end_date=end_date,
+            daily_returns=returns_analysis,
+            risk_free_rate=risk_free_rate,
+            periods_per_year=periods_per_year,
+            drawdown_analysis=drawdown_analysis,
+        )
 
         results.append(
             {
@@ -237,6 +310,7 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
                 "ending_value": final_value,
                 "return_pct": ((final_value / initial_cash) - 1.0) * 100.0,
                 "trades_executed": len(ticker_decisions),
+                **metrics,
             }
         )
 
