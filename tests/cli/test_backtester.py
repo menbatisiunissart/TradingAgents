@@ -129,12 +129,41 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
         "trading_days_per_year": 252,
     }
 
+    baseline_tracker = {}
+
+    def fake_evaluate_baselines(**kwargs):
+        baseline_tracker.update(kwargs)
+        return [
+            {
+                "model": "Buy and Hold",
+                "starting_cash": kwargs["initial_cash"],
+                "ending_value": kwargs["initial_cash"] * 1.1,
+                "return_pct": 10.0,
+                "trades_executed": 2,
+                "cumulative_return": 10.0,
+                "annualized_return": 12.0,
+                "sharpe_ratio": 1.5,
+                "max_drawdown": -5.0,
+            }
+        ]
+
+    monkeypatch.setattr(backtester, "_evaluate_baselines", fake_evaluate_baselines)
+
     results = backtester.run_backtests(config, base_path=tmp_path)
 
     assert price_calls == [("AAPL", "2023-12-30", "2024-01-06")]
-    assert len(results) == 1
+    assert len(results) == 2
+    backtester.write_results(results, {"output_csv": "results.csv"}, tmp_path)
+    written = pd.read_csv(tmp_path / "results.csv")
+    assert list(written.columns[:2]) == ["ticker", "model"]
 
-    result = results[0]
+    assert baseline_tracker["initial_cash"] == 5000
+    assert baseline_tracker["commission"] == 0.002
+
+    agent_result = next(item for item in results if item["model"] == "TradingAgents")
+    baseline_result = next(item for item in results if item["model"] == "Buy and Hold")
+
+    result = agent_result
     assert result["ticker"] == "AAPL"
     assert result["starting_cash"] == 5000
     assert result["ending_value"] == pytest.approx(5123.45)
@@ -176,6 +205,10 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
     assert strategy_kwargs["buy_value"] == "BUY"
     assert strategy_kwargs["sell_value"] == "SELL"
 
+    assert baseline_result["ticker"] == "AAPL"
+    assert baseline_result["return_pct"] == 10.0
+    assert baseline_result["trades_executed"] == 2
+
 
 def test_run_backtests_errors_when_price_data_missing(monkeypatch, tmp_path):
     decisions_path = tmp_path / "decisions.csv"
@@ -194,3 +227,35 @@ def test_run_backtests_errors_when_price_data_missing(monkeypatch, tmp_path):
         backtester.run_backtests(config, base_path=tmp_path)
 
     assert "No price data returned" in str(exc.value)
+
+
+def test_evaluate_baselines_produces_entries():
+    index = pd.date_range("2024-01-01", periods=120, freq="D")
+    base_prices = pd.Series(range(120), index=index, dtype=float) + 100
+    price_frame = pd.DataFrame(
+        {
+            "Open": base_prices + 0.1,
+            "High": base_prices + 1.0,
+            "Low": base_prices - 1.0,
+            "Close": base_prices,
+            "Volume": 1_000,
+        },
+        index=index,
+    )
+
+    baselines = backtester._evaluate_baselines(
+        price_frame=price_frame,
+        initial_cash=10_000,
+        commission=0.001,
+        start_date=index[0].date(),
+        end_date=index[-1].date(),
+        risk_free_rate=0.02,
+        periods_per_year=252,
+    )
+
+    model_names = {row["model"] for row in baselines}
+    expected_models = {"Buy and Hold", "MACD", "KDJ+RSI", "ZMR", "SMA"}
+    assert model_names == expected_models
+    for row in baselines:
+        assert "ending_value" in row
+        assert "cumulative_return" in row
