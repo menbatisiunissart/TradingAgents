@@ -227,6 +227,7 @@ project: Example
     assert options["analysts"] == ["market"]
     assert options["pause_seconds"] == 0.5
     assert options["project"] == "Example"
+    assert options["config_path"] == config_path
 
 
 def test_load_batch_config_rejects_empty_project(tmp_path: Path):
@@ -295,6 +296,7 @@ end_date: 2024-01-06
     assert captured["tickers"] == ["SPY"]
     assert captured["start_date"] == dt.date(2024, 1, 5)
     assert captured["end_date"] == dt.date(2024, 1, 6)
+    assert captured["config_path"] == config_path
 
 
 def test_run_batch_scopes_results_dir_by_project(monkeypatch, tmp_path: Path):
@@ -331,4 +333,40 @@ def test_run_batch_scopes_results_dir_by_project(monkeypatch, tmp_path: Path):
 
     assert captured_dirs == [str(expected_project_dir)]
     assert expected_project_dir.is_dir()
+    assert batch_runner.cli_main.DEFAULT_CONFIG == base_config.copy()
+
+
+def test_run_batch_copies_config_into_project_dir(monkeypatch, tmp_path: Path):
+    config_source = tmp_path / "batch.yaml"
+    config_source.write_text("sample: value\n")
+
+    base_results_dir = tmp_path / "outputs"
+    base_config = {
+        "backend_url": "base-url",
+        "quick_think_llm": "quick",
+        "deep_think_llm": "deep",
+        "llm_provider": "openai",
+        "max_debate_rounds": 1,
+        "max_risk_discuss_rounds": 1,
+        "results_dir": str(base_results_dir),
+    }
+    monkeypatch.setattr(batch_runner.cli_main, "DEFAULT_CONFIG", base_config.copy())
+
+    monkeypatch.setattr(batch_runner.cli_main, "run_analysis", lambda: None)
+
+    batch_runner.run_batch(
+        tickers=["SPY"],
+        start_date=dt.date(2024, 1, 5),
+        end_date=dt.date(2024, 1, 5),
+        backend_url="override-url",
+        shallow_thinker="fast",
+        deep_thinker="deep",
+        project="demo",
+        config_path=config_source,
+    )
+
+    copied = (base_results_dir / "demo" / config_source.name)
+
+    assert copied.is_file()
+    assert copied.read_text() == config_source.read_text()
     assert batch_runner.cli_main.DEFAULT_CONFIG == base_config.copy()
