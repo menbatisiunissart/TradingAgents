@@ -148,6 +148,7 @@ def load_batch_config(config_path: Union[str, Path]) -> Dict[str, Any]:
         "shallow_thinker",
         "deep_thinker",
         "pause_seconds",
+        "project",
     }
 
     unexpected = sorted(set(options) - allowed_keys)
@@ -170,6 +171,13 @@ def load_batch_config(config_path: Union[str, Path]) -> Dict[str, Any]:
     if isinstance(analysts, str):
         options["analysts"] = [analysts]
 
+    project = options.get("project")
+    if project is not None:
+        project_str = str(project).strip()
+        if not project_str:
+            raise ValueError("'project' cannot be an empty string.")
+        options["project"] = project_str
+
     return options
 
 
@@ -185,6 +193,7 @@ def run_batch(
     shallow_thinker: Optional[str] = None,
     deep_thinker: Optional[str] = None,
     pause_seconds: float = 0.0,
+    project: Optional[str] = None,
 ) -> None:
     """Run the CLI sequentially for each ticker across a shared date range.
 
@@ -210,6 +219,8 @@ def run_batch(
         Name of the deep-think LLM to use for every run.
     pause_seconds
         Delay inserted between runs to avoid hammering downstream services.
+    project
+        Optional project label used to scope outputs under ``results/{project}``.
 
     The provided ``start_date`` and ``end_date`` are applied to every ticker in ``tickers``.
     ``research_depth`` (when provided) is likewise reused for each run.
@@ -220,7 +231,14 @@ def run_batch(
 
     dates = list(_iterate_dates(start_date, end_date))
 
-    defaults: Mapping[str, Any] = dict(cli_main.DEFAULT_CONFIG)
+    defaults: Dict[str, Any] = dict(cli_main.DEFAULT_CONFIG)
+
+    project_dir: Optional[Path] = None
+    if project:
+        base_results_dir = Path(defaults.get("results_dir", "results"))
+        project_dir = base_results_dir / project
+        project_dir.mkdir(parents=True, exist_ok=True)
+        defaults["results_dir"] = str(project_dir)
 
     total_runs = len(tickers) * len(dates)
     run_index = 0

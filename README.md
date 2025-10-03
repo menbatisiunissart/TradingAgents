@@ -179,9 +179,30 @@ This will sequentially execute the CLI for each ticker/date combination, resetti
 state between runs and waiting two seconds between jobs (helpful for rate limits).
 
 Drop the run parameters into a YAML file under `config/`, for example `config/batch_runner.yaml`,
-and execute the helper via `uv`:
+and execute the helper via `uv`. You can optionally include a `project` label to scope every
+generated report under `results/<project>` so repeated runs stay organized:
 ```bash
 uv run python -m cli.batch_runner config/batch_runner.yaml
+```
+
+Example `config/batch_runner.yaml`:
+
+```yaml
+project: earnings-regression
+tickers:
+  - SPY
+  - QQQ
+start_date: 2024-01-05
+end_date: 2024-01-07
+research_depth: 2
+analysts:
+  - market
+  - news
+llm_provider: openai
+backend_url: http://localhost:8000
+shallow_thinker: gpt-4.1-mini
+deep_thinker: o4-mini
+pause_seconds: 2.0
 ```
 
 ## TradingAgents Package
