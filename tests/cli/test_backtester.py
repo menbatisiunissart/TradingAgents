@@ -54,6 +54,9 @@ def test_run_backtests_fetches_prices_and_returns_results(monkeypatch, tmp_path)
         def getvalue(self):
             return self.value
 
+        def set_coc(self, value):
+            self.coc = value
+
     class DummyAnalyzer:
         def __init__(self, data):
             self._data = data
