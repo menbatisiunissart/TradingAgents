@@ -15,6 +15,27 @@ def test_normalize_date_accepts_date_instance():
     assert normalized == "2024-05-17"
 
 
+def test_iterate_dates_filters_to_trading_days():
+    dates = list(
+        batch_runner._iterate_dates(dt.date(2024, 1, 1), dt.date(2024, 1, 8))
+    )
+
+    assert dates == [
+        dt.date(2024, 1, 2),
+        dt.date(2024, 1, 3),
+        dt.date(2024, 1, 4),
+        dt.date(2024, 1, 5),
+        dt.date(2024, 1, 8),
+    ]
+
+
+def test_iterate_dates_raises_when_no_trading_days():
+    with pytest.raises(ValueError) as exc:
+        list(batch_runner._iterate_dates(dt.date(2024, 7, 4), dt.date(2024, 7, 4)))
+
+    assert "trading days" in str(exc.value)
+
+
 def test_normalize_analysts_defaults_to_all_when_missing():
     analysts = batch_runner._normalize_analysts(None)
 
@@ -154,8 +175,8 @@ def test_run_batch_applies_overrides_and_resets(monkeypatch):
 
     batch_runner.run_batch(
         tickers=["spy", "QQQ"],
-        start_date=dt.date(2024, 1, 1),
-        end_date="2024-01-02",
+        start_date=dt.date(2024, 1, 3),
+        end_date="2024-01-04",
         research_depth=5,
         analysts=["market", AnalystType.NEWS],
         llm_provider="Anthropic",
@@ -188,10 +209,10 @@ def test_run_batch_applies_overrides_and_resets(monkeypatch):
     ]
 
     assert seen_runs == [
-        ("SPY", "2024-01-01"),
-        ("SPY", "2024-01-02"),
-        ("QQQ", "2024-01-01"),
-        ("QQQ", "2024-01-02"),
+        ("SPY", "2024-01-03"),
+        ("SPY", "2024-01-04"),
+        ("QQQ", "2024-01-03"),
+        ("QQQ", "2024-01-04"),
     ]
 
     buffer_ids = [call["buffer_id"] for call in calls]

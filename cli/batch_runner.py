@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Union
 from unittest.mock import patch
 
+import pandas_market_calendars as mcal
 import yaml
 
 from cli import main as cli_main
@@ -45,16 +46,20 @@ def _coerce_to_date(value: Union[str, _dt.date]) -> _dt.date:
 
 
 def _iterate_dates(start_date: Union[str, _dt.date], end_date: Union[str, _dt.date]) -> Iterator[_dt.date]:
-    """Yield every date between ``start_date`` and ``end_date`` (inclusive)."""
+    """Yield trading days between ``start_date`` and ``end_date`` (inclusive)."""
     start = _coerce_to_date(start_date)
     end = _coerce_to_date(end_date)
     if end < start:
         raise ValueError("'end_date' must be on or after 'start_date'.")
 
-    current = start
-    while current <= end:
-        yield current
-        current += _dt.timedelta(days=1)
+    calendar = mcal.get_calendar("XNYS")
+    schedule = calendar.schedule(start_date=start, end_date=end)
+    trading_days = [timestamp.date() for timestamp in schedule.index]
+
+    if not trading_days:
+        raise ValueError("The provided date range does not contain any trading days.")
+
+    yield from trading_days
 
 
 def _normalize_analysts(analysts: Optional[Sequence[AnalystInput]]) -> List[AnalystType]:
