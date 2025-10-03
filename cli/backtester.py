@@ -274,6 +274,66 @@ def _simulate_decision_series(
     }
 
 
+def _generate_backtrader_plot(
+    cerebro: bt.Cerebro,
+    *,
+    ticker: str,
+    start_date: dt.date,
+    end_date: dt.date,
+    base_path: Path,
+    config: Mapping[str, Any],
+) -> None:
+    plot_dir_cfg = config.get("plot_output_dir")
+    if not plot_dir_cfg:
+        return
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+        from matplotlib import dates as mdates
+        from matplotlib import pyplot as plt
+        from matplotlib.figure import Figure
+    except Exception as exc:  # pragma: no cover - plotting is optional
+        print(f"Skipping plot generation for {ticker}: {exc}")
+        return
+
+    output_dir = (base_path / plot_dir_cfg).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    style = str(config.get("plot_style", "candlestick"))
+    volume = bool(config.get("plot_volume", True))
+    dpi = int(config.get("plot_dpi", 120))
+
+    try:
+        plots = cerebro.plot(style=style, volume=volume, iplot=False)
+    except Exception as exc:  # pragma: no cover - plotting is optional
+        print(f"Failed to generate Backtrader plot for {ticker}: {exc}")
+        return
+
+    figures: List[Figure] = []
+    stack: List[Any] = list(plots if isinstance(plots, (list, tuple)) else [plots])
+    while stack:
+        item = stack.pop()
+        if isinstance(item, Figure):
+            figures.append(item)
+        elif isinstance(item, (list, tuple)):
+            stack.extend(item)
+
+    if not figures:
+        return
+
+    filename = f"{ticker}_{start_date:%Y%m%d}_{end_date:%Y%m%d}"
+    day_formatter = mdates.DateFormatter("%d")
+    for index, figure in enumerate(figures, start=1):
+        for axis in figure.get_axes():
+            axis.xaxis.set_major_formatter(day_formatter)
+        suffix = "" if len(figures) == 1 else f"_{index}"
+        output_path = output_dir / f"{filename}{suffix}.png"
+        figure.savefig(output_path, dpi=dpi, bbox_inches="tight")
+        plt.close(figure)
+
+
 def _baseline_buy_and_hold(
     price_frame: pd.DataFrame,
 ) -> Dict[dt.date, str]:
@@ -561,6 +621,15 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
             risk_free_rate=risk_free_rate,
             periods_per_year=periods_per_year,
             drawdown_analysis=drawdown_analysis,
+        )
+
+        _generate_backtrader_plot(
+            cerebro,
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            base_path=base_path,
+            config=config,
         )
 
         results.append(

@@ -27,3 +27,9 @@ sell_value: SELL
 
 # Persist a summary CSV of per-ticker/model performance (TradingAgents + baselines)
 output_csv: results/backtests.csv
+
+# Save Backtrader charts produced during each run.
+plot_output_dir: results/plots
+# plot_style: candlestick
+# plot_volume: true
+# plot_dpi: 160
