@@ -45,6 +45,7 @@ class DecisionStrategy(bt.Strategy):
         hold_value="HOLD",
         buy_value="BUY",
         sell_value="SELL",
+        coc=False,
     )
 
     def __init__(self) -> None:
@@ -60,9 +61,40 @@ class DecisionStrategy(bt.Strategy):
         self._buy = str(self.params.buy_value).strip().upper()
         self._sell = str(self.params.sell_value).strip().upper()
 
+        if getattr(self.params, "coc", False):
+            # Guard in case the provided broker implementation lacks cheat-on-close support.
+            try:
+                self.broker.set_coc(True)
+            except AttributeError:
+                pass
+
         # Capture what is shown on the Backtrader plot so it can be exported.
         self.trading_log: List[Dict[str, Any]] = []
-        self._executed_orders = defaultdict(list)
+        self._pending_executions: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self._log_index: Dict[str, int] = {}
+
+    def _format_execution_summary(self, executions: Iterable[Mapping[str, Any]]) -> str:
+        return ";".join(
+            f"{event['action']}:{event['size']:.4f}@{event['price']:.4f}"
+            for event in executions
+        )
+
+    def _update_log_entry_with_execution(self, key: str) -> None:
+        index = self._log_index.get(key)
+        if index is None or index >= len(self.trading_log):
+            return
+
+        executions = self._pending_executions.get(key, [])
+        if not executions:
+            return
+
+        entry = self.trading_log[index]
+        entry["orders_executed"] = self._format_execution_summary(executions)
+        entry["position_size"] = float(self.position.size)
+        entry["cash"] = float(self.broker.getcash())
+        entry["portfolio_value"] = float(self.broker.getvalue())
+        if key in self._pending_executions:
+            del self._pending_executions[key]
 
     def notify_order(self, order: bt.Order) -> None:  # pragma: no cover - Backtrader callback
         if order.status not in {order.Completed, order.Partial}:
@@ -74,7 +106,8 @@ class DecisionStrategy(bt.Strategy):
 
         timestamp = bt.num2date(executed_dt).replace(tzinfo=None)
         action = "BUY" if order.isbuy() else "SELL"
-        self._executed_orders[timestamp.isoformat()].append(
+        key = timestamp.isoformat()
+        self._pending_executions[key].append(
             {
                 "action": action,
                 "size": float(order.executed.size),
@@ -82,6 +115,8 @@ class DecisionStrategy(bt.Strategy):
                 "value": float(order.executed.value or 0.0),
             }
         )
+
+        self._update_log_entry_with_execution(key)
 
     def next(self) -> None:  # pragma: no cover - executed within Backtrader engine
         data = self.datas[0]
@@ -91,19 +126,17 @@ class DecisionStrategy(bt.Strategy):
 
         order_action = ""
         if decision == self._buy and not self.position:
-            self.buy(exectype=bt.Order.Close)
+            # With cheat-on-close enabled we can place market orders and they will
+            # execute on this bar's close instead of the following session.
+            self.buy()
             order_action = "BUY"
         elif decision == self._sell and self.position:
-            self.close(exectype=bt.Order.Close)
+            self.close()
             order_action = "SELL"
 
         key = current_dt.isoformat()
-        executed = self._executed_orders.get(key, [])
-        if executed:
-            del self._executed_orders[key]
-        executed_summary = ";".join(
-            f"{event['action']}:{event['size']:.4f}@{event['price']:.4f}"
-            for event in executed
+        executed_summary = self._format_execution_summary(
+            self._pending_executions.get(key, [])
         )
 
         volume_value = float("nan")
@@ -129,6 +162,9 @@ class DecisionStrategy(bt.Strategy):
                 "portfolio_value": float(self.broker.getvalue()),
             }
         )
+
+        self._log_index[key] = len(self.trading_log) - 1
+        self._update_log_entry_with_execution(key)
 
 
 def load_config(path: Path) -> Dict[str, Any]:
@@ -699,6 +735,7 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
             hold_value=config.get("hold_value", "HOLD"),
             buy_value=config.get("buy_value", "BUY"),
             sell_value=config.get("sell_value", "SELL"),
+            coc=True,
         )
         cerebro.addanalyzer(
             bt.analyzers.TimeReturn,
