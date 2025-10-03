@@ -215,6 +215,7 @@ start_date: 2024-01-05
 end_date: 2024-01-07
 analysts: market
 pause_seconds: 0.5
+project: Example
 """.strip()
     )
 
@@ -225,6 +226,25 @@ pause_seconds: 0.5
     assert options["end_date"] == dt.date(2024, 1, 7)
     assert options["analysts"] == ["market"]
     assert options["pause_seconds"] == 0.5
+    assert options["project"] == "Example"
+
+
+def test_load_batch_config_rejects_empty_project(tmp_path: Path):
+    config_path = tmp_path / "batch.yaml"
+    config_path.write_text(
+        """
+tickers:
+  - SPY
+start_date: 2024-01-05
+end_date: 2024-01-07
+project: "  "
+""".strip()
+    )
+
+    with pytest.raises(ValueError) as exc:
+        batch_runner.load_batch_config(config_path)
+
+    assert "project" in str(exc.value)
 
 
 def test_load_batch_config_validates_keys(tmp_path: Path):
@@ -275,3 +295,40 @@ end_date: 2024-01-06
     assert captured["tickers"] == ["SPY"]
     assert captured["start_date"] == dt.date(2024, 1, 5)
     assert captured["end_date"] == dt.date(2024, 1, 6)
+
+
+def test_run_batch_scopes_results_dir_by_project(monkeypatch, tmp_path: Path):
+    base_results_dir = tmp_path / "outputs"
+    base_config = {
+        "backend_url": "base-url",
+        "quick_think_llm": "quick",
+        "deep_think_llm": "deep",
+        "llm_provider": "openai",
+        "max_debate_rounds": 1,
+        "max_risk_discuss_rounds": 1,
+        "results_dir": str(base_results_dir),
+    }
+    monkeypatch.setattr(batch_runner.cli_main, "DEFAULT_CONFIG", base_config.copy())
+
+    captured_dirs = []
+
+    def fake_run_analysis():
+        captured_dirs.append(batch_runner.cli_main.DEFAULT_CONFIG["results_dir"])
+
+    monkeypatch.setattr(batch_runner.cli_main, "run_analysis", fake_run_analysis)
+
+    batch_runner.run_batch(
+        tickers=["SPY"],
+        start_date=dt.date(2024, 1, 5),
+        end_date=dt.date(2024, 1, 5),
+        backend_url="override-url",
+        shallow_thinker="fast",
+        deep_thinker="deep",
+        project="demo",
+    )
+
+    expected_project_dir = base_results_dir / "demo"
+
+    assert captured_dirs == [str(expected_project_dir)]
+    assert expected_project_dir.is_dir()
+    assert batch_runner.cli_main.DEFAULT_CONFIG == base_config.copy()
