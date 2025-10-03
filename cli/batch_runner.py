@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -178,6 +179,8 @@ def load_batch_config(config_path: Union[str, Path]) -> Dict[str, Any]:
             raise ValueError("'project' cannot be an empty string.")
         options["project"] = project_str
 
+    options["config_path"] = path
+
     return options
 
 
@@ -194,6 +197,7 @@ def run_batch(
     deep_thinker: Optional[str] = None,
     pause_seconds: float = 0.0,
     project: Optional[str] = None,
+    config_path: Optional[Union[str, Path]] = None,
 ) -> None:
     """Run the CLI sequentially for each ticker across a shared date range.
 
@@ -221,6 +225,8 @@ def run_batch(
         Delay inserted between runs to avoid hammering downstream services.
     project
         Optional project label used to scope outputs under ``results/{project}``.
+    config_path
+        Optional path to the YAML batch configuration being executed.
 
     The provided ``start_date`` and ``end_date`` are applied to every ticker in ``tickers``.
     ``research_depth`` (when provided) is likewise reused for each run.
@@ -234,11 +240,17 @@ def run_batch(
     defaults: Dict[str, Any] = dict(cli_main.DEFAULT_CONFIG)
 
     project_dir: Optional[Path] = None
+    config_source = Path(config_path) if config_path else None
+
     if project:
         base_results_dir = Path(defaults.get("results_dir", "results"))
         project_dir = base_results_dir / project
         project_dir.mkdir(parents=True, exist_ok=True)
         defaults["results_dir"] = str(project_dir)
+
+        if config_source and config_source.is_file():
+            destination = project_dir / config_source.name
+            shutil.copy2(config_source, destination)
 
     total_runs = len(tickers) * len(dates)
     run_index = 0

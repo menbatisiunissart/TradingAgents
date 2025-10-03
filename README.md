@@ -205,6 +205,9 @@ deep_thinker: o4-mini
 pause_seconds: 2.0
 ```
 
+When a `project` is supplied the batch runner also saves a copy of the YAML into
+`results/<project>/` so each run keeps its configuration alongside the generated reports.
+
 ## TradingAgents Package
 
 ### Implementation Details
