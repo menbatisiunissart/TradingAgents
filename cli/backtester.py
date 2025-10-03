@@ -67,9 +67,9 @@ class DecisionStrategy(bt.Strategy):
             return
 
         if decision == self._buy and not self.position:
-            self.buy()
+            self.buy(exectype=bt.Order.Close)
         elif decision == self._sell and self.position:
-            self.close()
+            self.close(exectype=bt.Order.Close)
 
 
 def load_config(path: Path) -> Dict[str, Any]:
@@ -508,9 +508,14 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
         if not ticker_decisions:
             continue
 
-        decision_dates = sorted(ticker_decisions.keys())
-        start_date = decision_dates[0]
-        end_date = decision_dates[-1]
+        # Order the decision dates explicitly so we know the first and last
+        # trading day covered by the generated signals.
+        sorted_decision_dates = sorted(
+            ticker_decisions.keys(),
+            key=lambda decision_date: decision_date,
+        )
+        start_date = sorted_decision_dates[0]
+        end_date = sorted_decision_dates[-1]
 
         price_frame = _fetch_price_history(
             ticker,
@@ -523,6 +528,7 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
         cerebro = bt.Cerebro()
         cerebro.broker.setcash(initial_cash)
         cerebro.broker.setcommission(commission)
+        cerebro.broker.set_coc(True)
         cerebro.addsizer(bt.sizers.SizerFix, stake=stake)
         cerebro.adddata(data_feed, name=ticker)
         cerebro.addstrategy(
