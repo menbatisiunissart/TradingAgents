@@ -30,6 +30,8 @@ output_csv: results/backtests.csv
 
 # Save Backtrader charts produced during each run.
 plot_output_dir: results/plots
+# Optionally set a different directory for the CSV export of plot data.
+# plot_data_output_dir: results/plots
 # plot_style: candlestick
 # plot_volume: true
 # plot_dpi: 160

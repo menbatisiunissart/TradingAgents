@@ -27,7 +27,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import statistics
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -60,16 +60,75 @@ class DecisionStrategy(bt.Strategy):
         self._buy = str(self.params.buy_value).strip().upper()
         self._sell = str(self.params.sell_value).strip().upper()
 
-    def next(self) -> None:  # pragma: no cover - executed within Backtrader engine
-        current_date = bt.num2date(self.datas[0].datetime[0]).date()
-        decision = self._decisions.get(current_date)
-        if not decision or decision == self._hold:
+        # Capture what is shown on the Backtrader plot so it can be exported.
+        self.trading_log: List[Dict[str, Any]] = []
+        self._executed_orders = defaultdict(list)
+
+    def notify_order(self, order: bt.Order) -> None:  # pragma: no cover - Backtrader callback
+        if order.status not in {order.Completed, order.Partial}:
             return
 
+        executed_dt = order.executed.dt or order.created.dt
+        if executed_dt is None:
+            return
+
+        timestamp = bt.num2date(executed_dt).replace(tzinfo=None)
+        action = "BUY" if order.isbuy() else "SELL"
+        self._executed_orders[timestamp.isoformat()].append(
+            {
+                "action": action,
+                "size": float(order.executed.size),
+                "price": float(order.executed.price or 0.0),
+                "value": float(order.executed.value or 0.0),
+            }
+        )
+
+    def next(self) -> None:  # pragma: no cover - executed within Backtrader engine
+        data = self.datas[0]
+        current_dt = bt.num2date(data.datetime[0]).replace(tzinfo=None)
+        current_date = current_dt.date()
+        decision = self._decisions.get(current_date)
+
+        order_action = ""
         if decision == self._buy and not self.position:
             self.buy(exectype=bt.Order.Close)
+            order_action = "BUY"
         elif decision == self._sell and self.position:
             self.close(exectype=bt.Order.Close)
+            order_action = "SELL"
+
+        key = current_dt.isoformat()
+        executed = self._executed_orders.get(key, [])
+        if executed:
+            del self._executed_orders[key]
+        executed_summary = ";".join(
+            f"{event['action']}:{event['size']:.4f}@{event['price']:.4f}"
+            for event in executed
+        )
+
+        volume_value = float("nan")
+        if hasattr(data, "volume"):
+            try:
+                volume_value = float(data.volume[0])
+            except (TypeError, IndexError):
+                pass
+
+        self.trading_log.append(
+            {
+                "datetime": current_dt.isoformat(),
+                "open": float(data.open[0]),
+                "high": float(data.high[0]),
+                "low": float(data.low[0]),
+                "close": float(data.close[0]),
+                "volume": volume_value,
+                "decision": decision or self._hold,
+                "order_submitted": order_action,
+                "orders_executed": executed_summary,
+                "position_size": float(self.position.size),
+                "cash": float(self.broker.getcash()),
+                "portfolio_value": float(self.broker.getvalue()),
+            }
+        )
 
 
 def load_config(path: Path) -> Dict[str, Any]:
@@ -332,6 +391,49 @@ def _generate_backtrader_plot(
         output_path = output_dir / f"{filename}{suffix}.png"
         figure.savefig(output_path, dpi=dpi, bbox_inches="tight")
         plt.close(figure)
+
+
+def _export_plot_data_csv(
+    trading_log: Iterable[Mapping[str, Any]],
+    *,
+    ticker: str,
+    start_date: dt.date,
+    end_date: dt.date,
+    base_path: Path,
+    config: Mapping[str, Any],
+) -> None:
+    rows = list(trading_log)
+    if not rows:
+        return
+
+    output_dir_cfg = config.get("plot_data_output_dir") or config.get("plot_output_dir")
+    if not output_dir_cfg:
+        return
+
+    output_dir = (base_path / output_dir_cfg).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = f"{ticker}_{start_date:%Y%m%d}_{end_date:%Y%m%d}_plotdata.csv"
+    frame = pd.DataFrame(rows)
+    column_order = [
+        "datetime",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "decision",
+        "order_submitted",
+        "orders_executed",
+        "position_size",
+        "cash",
+        "portfolio_value",
+    ]
+    existing_columns = [col for col in column_order if col in frame.columns]
+    frame = frame[existing_columns]
+
+    output_path = output_dir / filename
+    frame.to_csv(output_path, index=False)
 
 
 def _baseline_buy_and_hold(
@@ -623,6 +725,15 @@ def run_backtests(config: Mapping[str, Any], *, base_path: Path) -> List[Dict[st
             drawdown_analysis=drawdown_analysis,
         )
 
+        _export_plot_data_csv(
+            getattr(strategy, "trading_log", []),
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            base_path=base_path,
+            config=config,
+        )
+        
         _generate_backtrader_plot(
             cerebro,
             ticker=ticker,
