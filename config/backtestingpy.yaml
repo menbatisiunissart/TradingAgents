@@ -1,0 +1,30 @@
+# Sample configuration for cli.backtestingpy_runner
+# Relative paths resolve from the project root (config/..); use absolute paths if needed.
+
+decisions_csv: results/decisions.csv
+
+decision_column: final_decision
+buy_value: BUY
+sell_value: SELL
+hold_value: HOLD
+stake: 10
+
+price_padding_days: 5
+price_interval: 1d
+price_data_columns:
+  open_col: Open
+  high_col: High
+  low_col: Low
+  close_col: Close
+  volume_col: Volume
+
+backtest:
+  cash: 100000
+  commission: 0.001
+  exclusive_orders: true
+  hedging: false
+
+outputs:
+  stats_csv: results/backtestingpy_stats.csv
+  trades_dir: results/backtestingpy_trades
+  equity_curve_dir: results/backtestingpy_equity
