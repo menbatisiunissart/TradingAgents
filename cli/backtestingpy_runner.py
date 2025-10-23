@@ -117,8 +117,14 @@ def _resolve_path(base: Path, value: str, *, prefer_project_root: bool = True) -
     return project_candidate
 
 
-def _resolve_existing_path(base: Path, value: str, description: str) -> Path:
-    path = _resolve_path(base, value)
+def _resolve_existing_path(
+    base: Path,
+    value: str,
+    description: str,
+    *,
+    prefer_project_root: bool = True,
+) -> Path:
+    path = _resolve_path(base, value, prefer_project_root=prefer_project_root)
     if path.exists():
         return path
 
@@ -126,7 +132,8 @@ def _resolve_existing_path(base: Path, value: str, description: str) -> Path:
     candidate = Path(value)
     if not candidate.is_absolute():
         attempted.append((base / candidate).resolve())
-        attempted.append((base.parent / candidate).resolve())
+        if prefer_project_root:
+            attempted.append((base.parent / candidate).resolve())
 
     message = f"{description} not found at expected location: {path}"
     if attempted:
@@ -134,10 +141,15 @@ def _resolve_existing_path(base: Path, value: str, description: str) -> Path:
     raise FileNotFoundError(message)
 
 
-def _prepare_output_path(path: Optional[str], base_path: Path) -> Optional[Path]:
+def _prepare_output_path(
+    path: Optional[str],
+    base_path: Path,
+    *,
+    prefer_project_root: bool = True,
+) -> Optional[Path]:
     if not path:
         return None
-    resolved = _resolve_path(base_path, path)
+    resolved = _resolve_path(base_path, path, prefer_project_root=prefer_project_root)
     if resolved.suffix:
         resolved.parent.mkdir(parents=True, exist_ok=True)
     else:
@@ -292,11 +304,21 @@ def run_backtests(config_path: Path) -> None:
     base_path = config_path.parent.resolve()
     config = _load_config(config_path)
 
-    decisions_csv = config.get("decisions_csv")
-    if not decisions_csv:
-        raise KeyError("Configuration must include 'decisions_csv'")
+    project_name = config.get("project")
+    if not project_name:
+        raise KeyError("Configuration must include 'project'")
 
-    decisions_path = _resolve_existing_path(base_path, str(decisions_csv), "Decisions CSV")
+    project_dir = (base_path.parent / "results" / project_name).resolve()
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    decisions_csv = config.get("decisions_csv", "decisions.csv")
+    decisions_path = _resolve_existing_path(
+        project_dir,
+        str(decisions_csv),
+        "Decisions CSV",
+        prefer_project_root=False,
+    )
+
     decisions_df = pd.read_csv(decisions_path, parse_dates=["analysis_date"])
 
     if "ticker" not in decisions_df.columns or "analysis_date" not in decisions_df.columns:
@@ -330,10 +352,17 @@ def run_backtests(config_path: Path) -> None:
     hedging = bool(backtest_options.get("hedging", False))
 
     outputs = config.get("outputs", {})
-    stats_output = _prepare_output_path(outputs.get("stats_csv"), base_path)
-    trades_dir = _prepare_output_path(outputs.get("trades_dir"), base_path)
-    equity_dir = _prepare_output_path(outputs.get("equity_curve_dir"), base_path)
-    plots_dir = _prepare_output_path(outputs.get("plots_dir"), base_path)
+
+    def _output_path(option: str, default: Optional[str]) -> Optional[Path]:
+        value = outputs.get(option)
+        if value is None and option not in outputs:
+            value = default
+        return _prepare_output_path(value, project_dir, prefer_project_root=False)
+
+    stats_output = _output_path("stats_csv", "backtestingpy_stats.csv")
+    trades_dir = _output_path("trades_dir", "backtestingpy_trades")
+    equity_dir = _output_path("equity_curve_dir", "backtestingpy_equity")
+    plots_dir = _output_path("plots_dir", "backtestingpy_plots")
 
     summaries: List[Dict[str, Any]] = []
 

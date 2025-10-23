@@ -1,7 +1,9 @@
 # Sample configuration for cli.backtestingpy_runner
-# Relative paths resolve from the project root (config/..); use absolute paths if needed.
+# Relative paths resolve inside the project folder under ./results.
 
-decisions_csv: results/decisions.csv
+project: 4-AAPL Jan 25
+# Optional override; defaults to decisions.csv inside the project folder.
+decisions_csv: decisions.csv
 
 decision_column: final_decision
 buy_value: BUY
@@ -25,7 +27,7 @@ backtest:
   hedging: false
 
 outputs:
-  stats_csv: results/backtestingpy_stats.csv
-  trades_dir: results/backtestingpy_trades
-  equity_curve_dir: results/backtestingpy_equity
-  plots_dir: results/backtestingpy_plots
+  stats_csv: backtestingpy_stats.csv
+  trades_dir: backtestingpy_trades
+  equity_curve_dir: backtestingpy_equity
+  plots_dir: backtestingpy_plots
