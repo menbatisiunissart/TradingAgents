@@ -297,6 +297,7 @@ def run_backtests(config_path: Path) -> None:
     stats_output = _prepare_output_path(outputs.get("stats_csv"), base_path)
     trades_dir = _prepare_output_path(outputs.get("trades_dir"), base_path)
     equity_dir = _prepare_output_path(outputs.get("equity_curve_dir"), base_path)
+    plots_dir = _prepare_output_path(outputs.get("plots_dir"), base_path)
 
     summaries: List[Dict[str, Any]] = []
 
@@ -355,6 +356,24 @@ def run_backtests(config_path: Path) -> None:
         if equity_dir and "_equity_curve" in stats:
             equity_path = equity_dir / f"{ticker}_equity_curve.csv"
             stats["_equity_curve"].to_csv(equity_path, index=False)
+
+        if plots_dir:
+            plot_path = plots_dir / f"{ticker}_backtest.html"
+            try:
+                backtest.plot(
+                    results=stats,
+                    filename=str(plot_path),
+                    open_browser=False,
+                    plot_trades=True,
+                    plot_equity=True,
+                    plot_return=False,
+                    plot_pl=True,
+                    plot_volume=True,
+                    plot_drawdown=True,
+                )
+                logger.info("Wrote backtest plot to %s", plot_path)
+            except Exception as exc:  # pragma: no cover - plotting best-effort
+                logger.warning("Failed to render plot for %s: %s", ticker, exc)
 
     if summaries and stats_output:
         summaries_df = pd.DataFrame(summaries)

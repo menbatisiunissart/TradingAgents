@@ -28,3 +28,4 @@ outputs:
   stats_csv: results/backtestingpy_stats.csv
   trades_dir: results/backtestingpy_trades
   equity_curve_dir: results/backtestingpy_equity
+  plots_dir: results/backtestingpy_plots
