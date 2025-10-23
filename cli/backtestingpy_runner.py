@@ -370,6 +370,8 @@ def run_backtests(config_path: Path) -> None:
                     plot_pl=True,
                     plot_volume=True,
                     plot_drawdown=True,
+                    resample=False,      # avoid plot-time resampling/aggregation
+                    superimpose=False    # avoid higher-timeframe candle overlay
                 )
                 logger.info("Wrote backtest plot to %s", plot_path)
             except Exception as exc:  # pragma: no cover - plotting best-effort
