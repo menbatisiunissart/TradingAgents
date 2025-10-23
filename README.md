@@ -208,6 +208,20 @@ pause_seconds: 2.0
 When a `project` is supplied the batch runner also saves a copy of the YAML into
 `results/<project>/` so each run keeps its configuration alongside the generated reports.
 
+### Backtesting Recorded Decisions
+
+Replay prior TradingAgents decisions against historical price data with the Backtesting.py
+integration. Configure the run via `config/backtestingpy.yaml`, which mirrors the batch runner by
+using a `project` key to scope inputs and outputs under `results/<project>/`. Generated artifacts
+include summary stats, per-trade logs, equity curves, and HTML charts.
+
+```bash
+uv run python -m cli.backtestingpy_runner config/backtestingpy.yaml
+```
+
+By default the runner consumes `results/<project>/decisions.csv` and writes its outputs back into the
+same directory, but you can override any paths inside the YAML if needed.
+
 ## TradingAgents Package
 
 ### Implementation Details
