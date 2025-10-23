@@ -176,6 +176,42 @@ def _flatten_columns(columns: pd.Index) -> List[str]:
     return flattened
 
 
+def _normalize_column_key(name: Any) -> str:
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def _reorder_trade_columns(trades: pd.DataFrame) -> pd.DataFrame:
+    if trades.empty:
+        return trades
+
+    columns = list(trades.columns)
+    normalized_map = {_normalize_column_key(col): col for col in columns}
+
+    entry_key = _normalize_column_key("Entry Price")
+    entry_col = normalized_map.get(entry_key)
+    if not entry_col:
+        return trades
+
+    desired_labels = ["Entry Time", "Entry Price", "Exit Time", "Exit Price", "Duration"]
+    target_cols: List[str] = []
+    for label in desired_labels:
+        col = normalized_map.get(_normalize_column_key(label))
+        if col and col not in target_cols:
+            target_cols.append(col)
+
+    if len(target_cols) <= 1:
+        return trades
+
+    entry_index = columns.index(entry_col)
+    for col in target_cols:
+        if col in columns:
+            columns.remove(col)
+    for col in reversed(target_cols):
+        columns.insert(entry_index, col)
+
+    return trades.loc[:, columns]
+
+
 def _fetch_price_history(
     ticker: str,
     start_date: dt.date,
@@ -351,7 +387,8 @@ def run_backtests(config_path: Path) -> None:
 
         if trades_dir and "_trades" in stats:
             trades_path = trades_dir / f"{ticker}_trades.csv"
-            stats["_trades"].to_csv(trades_path, index=False)
+            trades_df = _reorder_trade_columns(stats["_trades"].copy())
+            trades_df.to_csv(trades_path, index=False)
 
         if equity_dir and "_equity_curve" in stats:
             equity_path = equity_dir / f"{ticker}_equity_curve.csv"
