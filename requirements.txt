@@ -11,6 +11,7 @@ eodhd
 langgraph
 chromadb
 setuptools
+backtesting
 backtrader
 akshare
 tushare
